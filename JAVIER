@@ -1,0 +1,326 @@
+# Calculadora Residual - KALMAR DCG250-10 (PWA)
+
+Este projeto é uma Calculadora Residual com design moderno e suporte a PWA (instalável no celular).
+
+## Como usar
+1. Faça o deploy dos arquivos em qualquer hospedagem estática: **GitHub Pages**, **Netlify**, **Vercel** ou um servidor interno.
+2. Acesse a URL no celular Android/Chrome.
+3. Toque em **Adicionar à tela inicial** para instalar como aplicativo offline.
+
+## Estrutura
+- `index.html` — Estrutura da interface
+- `style.css` — Estilos (gradiente, glassmorphism)
+- `script.js` — Lógica (tabelas, interpolação, status)
+- `manifest.webmanifest` — Manifesto PWA
+- `service-worker.js` — Cache offline
+- `icons/` — Ícones do app
+
+## Regras
+- Implementos: **GARFO** (interpolação com tabela) e **ARIETE** (apenas 900 mm = 25000 kg)
+- Se o **centro de carga > 1800 mm** → **Perigo de Tombamento** (independente do peso).
+- A calculadora informa a **Capacidade de Carga (kg)** para o centro informado.
+
+## Editar Tabelas
+Abra `script.js` e ajuste os objetos `garfoTable` e `arieteTable` conforme necessário.
+
+
+let currentImplement = 'GARFO';
+
+// Tabelas de dados
+const garfoTable = {
+  0: 25000, 1: 25000, 450: 25000, 500: 25000, 750: 25000, 1000: 25000,
+  1200: 25000, 1350: 22500, 1500: 20000, 1650: 18325, 1800: 16650,
+  1801: 16639, 1802: 16628, 1803: 16617, 1804: 16606, 1805: 16595,
+  1806: 16584, 1850: 16091, 1900: 15533, 1950: 14975, 2000: 14416,
+  2050: 13857, 2100: 13299, 2150: 12750, 2200: 12182, 2250: 11623,
+  2300: 11065, 2350: 10507, 2400: 9948, 2450: 9390, 2500: 8831
+};
+
+// Para ARIETE, apenas ponto conhecido: 900 mm -> 25000 kg
+// Mantemos sem interpolação até que novos pontos sejam adicionados.
+const arieteTable = { 900: 25000 };
+
+// Elementos
+const garfoBtn = document.getElementById('garfo-btn');
+const arieteBtn = document.getElementById('ariete-btn');
+const activeImplementEl = document.getElementById('activeImplement');
+const centerInput = document.getElementById('centerLoad');
+const capacityEl = document.getElementById('loadCapacity');
+const statusEl = document.getElementById('safetyStatus');
+const maxHeightEl = document.getElementById('maxHeight');
+
+garfoBtn.addEventListener('click', () => selectImplement('GARFO'));
+arieteBtn.addEventListener('click', () => selectImplement('ARIETE'));
+centerInput.addEventListener('input', calculateCapacity);
+
+function selectImplement(implement) {
+  currentImplement = implement;
+  garfoBtn.classList.toggle('active', implement === 'GARFO');
+  arieteBtn.classList.toggle('active', implement === 'ARIETE');
+  garfoBtn.setAttribute('aria-pressed', implement === 'GARFO');
+  arieteBtn.setAttribute('aria-pressed', implement === 'ARIETE');
+  activeImplementEl.textContent = implement;
+  maxHeightEl.textContent = implement === 'GARFO' ? '6500 mm' : '7150 mm';
+  calculateCapacity();
+}
+
+function calculateCapacity() {
+  const centerLoad = parseInt(centerInput.value, 10);
+  if (Number.isNaN(centerLoad) || centerLoad < 0) {
+    capacityEl.textContent = '-- kg';
+    statusEl.textContent = 'Digite o centro de carga';
+    statusEl.className = 'result-value';
+    return;
+  }
+
+  const table = currentImplement === 'GARFO' ? garfoTable : arieteTable;
+  const keys = Object.keys(table).map(Number).sort((a, b) => a - b);
+
+  let capacity = 0;
+
+  if (table[centerLoad] !== undefined) {
+    capacity = table[centerLoad];
+  } else {
+    if (currentImplement === 'GARFO') {
+      // Interpolação linear apenas para GARFO
+      let found = false;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (centerLoad > keys[i] && centerLoad < keys[i + 1]) {
+          const x1 = keys[i], y1 = table[keys[i]];
+          const x2 = keys[i + 1], y2 = table[keys[i + 1]];
+          capacity = Math.round(y1 + (y2 - y1) * (centerLoad - x1) / (x2 - x1));
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        if (centerLoad < keys[0]) {
+          capacity = table[keys[0]];
+        } else if (centerLoad > keys[keys.length - 1]) {
+          capacity = 0; // Fora dos dados
+        }
+      }
+    } else {
+      // ARIETE: sem interpolação. Se não for 900, é fora dos limites
+      capacity = 0;
+    }
+  }
+
+  // Exibir capacidade
+  if (capacity > 0) {
+    capacityEl.textContent = capacity.toLocaleString('pt-BR') + ' kg';
+  } else {
+    capacityEl.textContent = 'Fora dos limites';
+  }
+
+  // Regras de status
+  if (capacity === 0) {
+    statusEl.textContent = 'Centro de carga fora dos limites operacionais ❌';
+    statusEl.className = 'result-value status-danger';
+  } else if (centerLoad <= 1800) {
+    statusEl.textContent = 'Carga Segura ✅';
+    statusEl.className = 'result-value status-safe';
+  } else {
+    statusEl.textContent = 'Perigo de Tombamento ⚠️';
+    statusEl.className = 'result-value status-danger';
+  }
+}
+
+// Inicialização
+selectImplement('GARFO');
+
+const CACHE = "kalmar-calc-v1";
+const ASSETS = [
+  "./",
+  "./index.html",
+  "./style.css",
+  "./script.js",
+  "./manifest.webmanifest",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png"
+];
+
+self.addEventListener("install", (e) => {
+  e.waitUntil(
+    caches.open(CACHE).then((cache) => cache.addAll(ASSETS))
+  );
+});
+
+self.addEventListener("activate", (e) => {
+  e.waitUntil(self.clients.claim());
+});
+
+self.addEventListener("fetch", (e) => {
+  e.respondWith(
+    caches.match(e.request).then((response) => response || fetch(e.request))
+  );
+});
+
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --navy: #1e3c72;
+  --blue: #2a5298;
+  --bordo: #8b1538;
+  --glass: rgba(255,255,255,0.1);
+  --text: rgba(255,255,255,0.9);
+  --muted: rgba(255,255,255,0.7);
+}
+html, body { min-height: 100%; }
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(135deg, var(--navy) 0%, var(--blue) 50%, var(--bordo) 100%);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.calculator-container {
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  padding: 32px;
+  width: 100%;
+  max-width: 520px;
+  animation: slideIn 0.6s ease-out;
+  color: var(--text);
+}
+@keyframes slideIn { from { opacity: 0; transform: translateY(20px);} to { opacity:1; transform: translateY(0);} }
+.header { text-align:center; margin-bottom: 24px; }
+.title { font-size: 26px; font-weight: 800; text-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+.model { font-size: 16px; color: var(--muted); margin-top: 6px; }
+
+.form-group { margin-bottom: 20px; }
+.label { display:block; font-weight:700; margin-bottom: 10px; text-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+
+.implement-selector { display:flex; gap:12px; }
+.implement-btn {
+  flex:1; padding: 12px 16px; border:none; border-radius: 12px; font-weight:700; cursor:pointer;
+  transition: all .25s ease; background: rgba(255,255,255,0.1); color: var(--muted);
+  border: 2px solid rgba(255,255,255,0.2);
+}
+.implement-btn.active {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  color:#fff; border-color: rgba(255,255,255,0.3); box-shadow: 0 4px 15px rgba(79,172,254,0.4);
+}
+.implement-btn:hover:not(.active) { background: rgba(255,255,255,0.2); color:#fff; }
+
+.input-field {
+  width: 100%; padding: 14px 16px; border:none; border-radius: 12px; font-size: 18px; font-weight: 500;
+  background: rgba(255,255,255,0.95); color: #2c3e50;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.12);
+}
+.input-field:focus {
+  outline: none; box-shadow: 0 0 0 3px rgba(79,172,254,0.3), inset 0 2px 4px rgba(0,0,0,0.1);
+  transform: translateY(-1px);
+}
+
+.result-section { background: rgba(255,255,255,0.06); border-radius: 16px; padding: 20px; border: 1px solid rgba(255,255,255,0.14); }
+.result-item { display:flex; justify-content: space-between; align-items:center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.result-item:last-child { border-bottom: none; }
+.result-label { color: rgba(255,255,255,0.85); }
+.result-value { font-weight:800; }
+.capacity-value { font-size: 22px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.status-safe { color: #2ecc71; }
+.status-danger { color:#e74c3c; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.7;} }
+
+.info-text { color: rgba(255,255,255,0.7); font-size: 14px; text-align:center; margin-top: 16px; font-style: italic; }
+@media (max-width: 600px) { .calculator-container { padding: 24px; } .title { font-size: 22px; } }
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calculadora Residual - KALMAR DCG250-10</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#1e3c72">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="calculator-container">
+    <header class="header">
+      <h1 class="title">Calculadora Residual</h1>
+      <p class="model">KALMAR DCG250-10</p>
+    </header>
+
+    <section class="form-group">
+      <label class="label">Implemento Selecionado:</label>
+      <div class="implement-selector">
+        <button class="implement-btn active" id="garfo-btn" aria-pressed="true">GARFO</button>
+        <button class="implement-btn" id="ariete-btn" aria-pressed="false">ARIETE</button>
+      </div>
+    </section>
+
+    <section class="form-group">
+      <label class="label" for="centerLoad">Centro de Carga (mm):</label>
+      <input
+        type="number"
+        id="centerLoad"
+        class="input-field"
+        placeholder="Digite o centro de carga em mm"
+        min="0"
+        max="2500"
+        step="1"
+        inputmode="numeric"
+        autocomplete="off"
+      />
+    </section>
+
+    <section class="result-section" aria-live="polite" aria-atomic="true">
+      <div class="result-item">
+        <span class="result-label">Implemento Ativo:</span>
+        <span class="result-value" id="activeImplement">GARFO</span>
+      </div>
+
+      <div class="result-item">
+        <span class="result-label">Capacidade de Carga:</span>
+        <span class="result-value capacity-value" id="loadCapacity">-- kg</span>
+      </div>
+
+      <div class="result-item">
+        <span class="result-label">Status da Carga:</span>
+        <span class="result-value" id="safetyStatus">Digite o centro de carga</span>
+      </div>
+
+      <div class="result-item">
+        <span class="result-label">Altura Máxima:</span>
+        <span class="result-value" id="maxHeight">6500 mm</span>
+      </div>
+    </section>
+
+    <p class="info-text">
+      Digite o centro de carga para calcular a capacidade residual automaticamente.
+      Se o centro de carga for maior que 1800 mm, será exibido <strong>Perigo de Tombamento</strong>.
+    </p>
+  </main>
+
+  <script src="script.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js');
+      });
+    }
+  </script>
+</body>
+</html>
+
+{
+  "name": "Calculadora Residual - KALMAR DCG250-10",
+  "short_name": "Calc Residual",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#1e3c72",
+  "theme_color": "#1e3c72",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
